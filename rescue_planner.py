@@ -1,8 +1,3 @@
-"""
-Disaster Zone Rescue Planner — A* Search on Real OSM Data
-INF375 Final Project
-"""
-
 import math
 import heapq
 import time
@@ -13,17 +8,17 @@ import pandas as pd
 import folium
 import streamlit as st
 from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
-# ─────────────────────────────────────────────────────────────
-#  Constants
-# ─────────────────────────────────────────────────────────────
-NODES_CSV  = "output_nodes.csv"
-EDGES_CSV  = "output_edges.csv"
+
+
+
+NODES_CSV = "output_nodes.csv"
+EDGES_CSV = "output_edges.csv"
 
 MAP_CENTER = [43.2075, 76.6364]
-MAP_ZOOM   = 13
+MAP_ZOOM  = 13
 
-# Road-type colours for the legend
 ROAD_COLORS = {
     "trunk": "#e74c3c",
     "trunk_link": "#e74c3c",
@@ -44,9 +39,9 @@ ROAD_COLORS = {
 }
 
 HEURISTIC_LABELS = {
-    "haversine":  "Haversine distance ÷ max-speed  (admissible, fast)",
-    "euclidean":  "Euclidean degree-distance  (non-admissible, aggressive)",
-    "zero":       "Zero heuristic  (= Dijkstra / UCS)",
+    "haversine": "Haversine distance ÷ max-speed  (admissible, fast)",
+    "euclidean": "Euclidean degree-distance  (non-admissible, aggressive)",
+    "zero": "Zero heuristic  (= Dijkstra / UCS)",
 }
 
 WEIGHT_LABELS = {
@@ -54,21 +49,55 @@ WEIGHT_LABELS = {
     "distance":    "Physical distance  (metres)",
 }
 
-# ─────────────────────────────────────────────────────────────
-#  Data loading  (cached so the CSVs are only read once)
-# ─────────────────────────────────────────────────────────────
+def get_geolocation():
+    """Injects JS that writes GPS coords into the URL query string,
+    then triggers a Streamlit rerun so query_params can be read."""
+    components.html("""
+        <button onclick="getLocation()" style="
+            background:#27ae60;color:white;border:none;padding:8px 14px;
+            border-radius:6px;cursor:pointer;font-size:14px;width:100%">
+             Use my current location
+        </button>
+        <div id="status" style="font-size:12px;margin-top:6px;color:#555"></div>
+        <script>
+        function getLocation() {
+            document.getElementById('status').innerText = 'Requesting GPS…';
+            if (!navigator.geolocation) {
+                document.getElementById('status').innerText = 'Geolocation not supported';
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    const lat = pos.coords.latitude;
+                    const lon = pos.coords.longitude;
+                    document.getElementById('status').innerText =
+                        'Got: ' + lat.toFixed(5) + ', ' + lon.toFixed(5) + ' — setting start…';
+                    // Write into parent page URL and trigger Streamlit rerun
+                    const url = new URL(window.parent.location.href);
+                    url.searchParams.set('geo_lat', lat.toFixed(6));
+                    url.searchParams.set('geo_lon', lon.toFixed(6));
+                    window.parent.history.replaceState({}, '', url);
+                    // Simulate a tiny DOM event so Streamlit detects a change
+                    window.parent.dispatchEvent(new Event('popstate'));
+                },
+                function(err) {
+                    document.getElementById('status').innerText = 'Error: ' + err.message;
+                }
+            );
+        }
+        </script>
+    """, height=80)
+
 @st.cache_data(show_spinner="Loading map data…")
 def load_graph():
     nodes_df = pd.read_csv(NODES_CSV, dtype={"node_id": str})
     edges_df = pd.read_csv(EDGES_CSV, dtype={"from_node": str, "to_node": str})
 
-    # node_id → (lat, lon)
     coords = {
         row.node_id: (float(row.lat), float(row.lon))
         for row in nodes_df.itertuples(index=False)
     }
 
-    # adjacency list: node_id → list of (neighbour, distance_m, travel_time_s, highway, way_id)
     graph = defaultdict(list)
     for row in edges_df.itertuples(index=False):
         graph[row.from_node].append({
@@ -82,9 +111,6 @@ def load_graph():
     return coords, graph, nodes_df, edges_df
 
 
-# ─────────────────────────────────────────────────────────────
-#  Heuristics
-# ─────────────────────────────────────────────────────────────
 EARTH_R = 6_371_000  # metres
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -100,12 +126,11 @@ def make_heuristic(heuristic_name, weight_mode, goal_lat, goal_lon, max_speed_ms
         lat, lon = coords[nid]
         dist = haversine_m(lat, lon, goal_lat, goal_lon)
         if weight_mode == "travel_time":
-            return dist / max_speed_ms        # optimistic: assume max speed
-        return dist                            # pure distance
+            return dist / max_speed_ms        
+        return dist                           
 
     def h_euclidean(coords, nid):
         lat, lon = coords[nid]
-        # Degree-distance (not admissible but fast for demo)
         dlat = math.radians(goal_lat - lat) * EARTH_R
         dlon = math.radians(goal_lon - lon) * EARTH_R * math.cos(math.radians(lat))
         dist = math.sqrt(dlat**2 + dlon**2)
@@ -121,9 +146,6 @@ def make_heuristic(heuristic_name, weight_mode, goal_lat, goal_lon, max_speed_ms
             "zero":      h_zero}[heuristic_name]
 
 
-# ─────────────────────────────────────────────────────────────
-#  A* Search
-# ─────────────────────────────────────────────────────────────
 def astar(coords, graph, start, goal,
           heuristic_name="haversine",
           weight_mode="travel_time",
@@ -141,16 +163,13 @@ def astar(coords, graph, start, goal,
         return [], {"error": "Start or goal node not in graph"}
 
     goal_lat, goal_lon = coords[goal]
-    # 110 km/h in m/s — used by admissible haversine heuristic
     max_speed_ms = 110 * 1000 / 3600
 
     h = make_heuristic(heuristic_name, weight_mode, goal_lat, goal_lon, max_speed_ms)
 
-    # g_cost[n] = best known cost from start to n
     g_cost = {start: 0.0}
     came_from = {start: None}
 
-    # Priority queue: (f, tie-breaker, node)
     counter = 0
     pq = [(h(coords, start), counter, start)]
 
@@ -162,7 +181,6 @@ def astar(coords, graph, start, goal,
         f, _, current = heapq.heappop(pq)
 
         if current == goal:
-            # Reconstruct path
             path = []
             node = goal
             while node is not None:
@@ -178,7 +196,6 @@ def astar(coords, graph, start, goal,
                 "weight_mode":    weight_mode,
             }
 
-        # Skip stale entries
         if f > g_cost.get(current, math.inf) + h(coords, current):
             continue
 
@@ -213,22 +230,15 @@ def astar(coords, graph, start, goal,
     }
 
 
-# ─────────────────────────────────────────────────────────────
-#  Nearest node finder
-# ─────────────────────────────────────────────────────────────
 def nearest_node(coords, lat, lon):
     """Return the node_id whose coordinates are closest to (lat, lon)."""
     best_id, best_d = None, math.inf
     for nid, (nlat, nlon) in coords.items():
-        d = (nlat - lat)**2 + (nlon - lon)**2   # squared OK for comparison
+        d = (nlat - lat)**2 + (nlon - lon)**2   
         if d < best_d:
             best_d, best_id = d, nid
     return best_id
 
-
-# ─────────────────────────────────────────────────────────────
-#  Map builder
-# ─────────────────────────────────────────────────────────────
 def build_map(coords, graph, edges_df,
               path=None,
               start_node=None, goal_node=None,
@@ -240,7 +250,6 @@ def build_map(coords, graph, edges_df,
     m = folium.Map(location=MAP_CENTER, zoom_start=MAP_ZOOM,
                    tiles="CartoDB positron")
 
-    # ── Optional: draw all road edges lightly ──────────────────────────
     if show_all_edges:
         plotted = set()
         for row in edges_df.itertuples(index=False):
@@ -263,7 +272,6 @@ def build_map(coords, graph, edges_df,
                 tooltip=f"{row.highway} | {row.distance_m:.0f}m"
             ).add_to(m)
 
-    # ── Draw A* path ──────────────────────────────────────────────────
     if path and len(path) > 1:
         path_coords = [list(coords[n]) for n in path if n in coords]
         folium.PolyLine(
@@ -272,7 +280,6 @@ def build_map(coords, graph, edges_df,
             tooltip="A* rescue path"
         ).add_to(m)
 
-        # Animate with arrows every few segments
         for i in range(0, len(path_coords) - 1, max(1, len(path_coords)//20)):
             mid_lat = (path_coords[i][0] + path_coords[i+1][0]) / 2
             mid_lon = (path_coords[i][1] + path_coords[i+1][1]) / 2
@@ -284,7 +291,6 @@ def build_map(coords, graph, edges_df,
                 )
             ).add_to(m)
 
-    # ── Start marker ────────────────────────────────────────────────
     if start_node and start_node in coords:
         lat, lon = coords[start_node]
         folium.Marker(
@@ -293,7 +299,6 @@ def build_map(coords, graph, edges_df,
             icon=folium.Icon(color="green", icon="ambulance", prefix="fa")
         ).add_to(m)
 
-    # ── Goal marker ─────────────────────────────────────────────────
     if goal_node and goal_node in coords:
         lat, lon = coords[goal_node]
         folium.Marker(
@@ -302,7 +307,6 @@ def build_map(coords, graph, edges_df,
             icon=folium.Icon(color="red", icon="flag", prefix="fa")
         ).add_to(m)
 
-    # ── Blocked nodes ────────────────────────────────────────────────
     for nid in list(blocked_nodes)[:200]:   # cap rendering
         if nid in coords:
             lat, lon = coords[nid]
@@ -315,45 +319,38 @@ def build_map(coords, graph, edges_df,
 
     return m
 
-
-# ─────────────────────────────────────────────────────────────
-#  Streamlit UI
-# ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Disaster Zone Rescue Planner",
     page_icon="",
     layout="wide",
 )
 
-# ── Load data ─────────────────────────────────────────────────
 coords, graph, nodes_df, edges_df = load_graph()
 all_node_ids = list(coords.keys())
 
-# ── Session state defaults ────────────────────────────────────
 for key, default in {
-    "start_node":    None,
-    "goal_node":     None,
-    "path":          [],
-    "stats":         {},
-    "blocked_ways":  set(),
+    "start_node": None,
+    "goal_node": None,
+    "path": [],
+    "stats": {},
+    "blocked_ways":set(),
     "blocked_nodes": set(),
-    "ran_search":    False,
+    "ran_search": False,
+    "geo_node": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
-# ── Header ────────────────────────────────────────────────────
 st.markdown("""
 <div style='background:linear-gradient(135deg,#c0392b,#e74c3c);
             padding:1.2rem 1.5rem;border-radius:10px;margin-bottom:1rem'>
-  <h1 style='color:white;margin:0;font-size:1.8rem'>🚑 Disaster Zone Rescue Planner</h1>
+  <h1 style='color:white;margin:0;font-size:1.8rem'>Disaster Zone Rescue Planner</h1>
   <p style='color:#fadbd8;margin:0.3rem 0 0'>
       A* pathfinding on real OpenStreetMap data · Almaty, Kazakhstan
   </p>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Layout: sidebar + main ────────────────────────────────────
 sidebar, main_col = st.columns([1, 2.8])
 
 with sidebar:
@@ -375,7 +372,23 @@ with sidebar:
     st.subheader("Waypoints")
     st.caption("Pick nodes by ID or use the random buttons.")
 
-    # Start node
+    get_geolocation()   
+
+    geo_lat = st.query_params.get("geo_lat")
+    geo_lon = st.query_params.get("geo_lon")
+    if geo_lat and geo_lon:
+        try:
+            clat, clon = float(geo_lat), float(geo_lon)
+            nid = nearest_node(coords, clat, clon)
+            if nid != st.session_state.geo_node:
+                st.session_state.geo_node   = nid
+                st.session_state.start_node = nid
+                st.query_params.clear()
+                st.success(f"Start set to nearest node {nid}")
+                st.rerun()
+        except ValueError:
+            pass
+
     c1, c2 = st.columns([3, 1])
     with c1:
         start_input = st.text_input(
@@ -386,11 +399,10 @@ with sidebar:
     with c2:
         st.write("")
         st.write("")
-        if st.button("🎲", key="rand_start", help="Random start"):
+        if st.button("Random Start", key="rand_start", help="Random start"):
             st.session_state.start_node = random.choice(all_node_ids)
             st.rerun()
 
-    # Goal node
     c3, c4 = st.columns([3, 1])
     with c3:
         goal_input = st.text_input(
@@ -401,17 +413,15 @@ with sidebar:
     with c4:
         st.write("")
         st.write("")
-        if st.button("🎲", key="rand_goal", help="Random goal"):
+        if st.button("Random Goal", key="rand_goal", help="Random goal"):
             st.session_state.goal_node = random.choice(all_node_ids)
             st.rerun()
 
-    # Apply typed IDs
     if start_input.strip() and start_input.strip() in coords:
         st.session_state.start_node = start_input.strip()
     if goal_input.strip()  and goal_input.strip()  in coords:
         st.session_state.goal_node  = goal_input.strip()
 
-    # Show coords
     if st.session_state.start_node:
         lat, lon = coords[st.session_state.start_node]
         st.caption(f"Start: {lat:.5f}, {lon:.5f}")
@@ -433,11 +443,11 @@ with sidebar:
         help="Simulates collapsed intersections"
     )
 
-    if st.button("🔀 Apply road blockages", use_container_width=True):
-        total_ways   = edges_df["way_id"].nunique()
-        total_nodes  = len(all_node_ids)
-        n_block_ways  = int(total_ways  * block_pct        / 100)
-        n_block_nodes = int(total_nodes * block_pct_nodes  / 100)
+    if st.button("Apply road blockages", use_container_width=True):
+        total_ways = edges_df["way_id"].nunique()
+        total_nodes = len(all_node_ids)
+        n_block_ways = int(total_ways  * block_pct / 100)
+        n_block_nodes = int(total_nodes * block_pct_nodes / 100)
         all_way_ids = edges_df["way_id"].astype(str).unique().tolist()
         st.session_state.blocked_ways  = set(random.sample(all_way_ids,   n_block_ways))
         st.session_state.blocked_nodes = set(random.sample(all_node_ids,  n_block_nodes))
@@ -452,12 +462,10 @@ with sidebar:
         st.session_state.ran_search = False
 
     st.markdown("---")
-    show_all = st.checkbox("Show road network on map", value=False,
-                           help="Renders all edges — slower for large maps")
+    show_all = st.checkbox("Show road network on map", value=False, help="Renders all edges — slower for large maps")
 
     run_btn = st.button("Run A* Search", type="primary", use_container_width=True)
 
-# ── Run search ────────────────────────────────────────────────
 if run_btn:
     if not st.session_state.start_node or not st.session_state.goal_node:
         st.error("Please set both a start and a goal node first.")
@@ -478,9 +486,7 @@ if run_btn:
         st.session_state.stats = stats
         st.session_state.ran_search = True
 
-# ── Main area ─────────────────────────────────────────────────
 with main_col:
-    # Stats panel
     if st.session_state.ran_search:
         stats = st.session_state.stats
         if "error" in stats and not st.session_state.path:
@@ -492,13 +498,12 @@ with main_col:
                         else f"{cost_val/1000:.2f} km")
 
             m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Path nodes",       len(st.session_state.path))
-            m2.metric("Route cost",        cost_str)
-            m3.metric("Nodes explored",   f"{stats.get('nodes_explored',0):,}")
-            m4.metric("Edges relaxed",    f"{stats.get('edges_relaxed',0):,}")
-            m5.metric("CPU time",         f"{stats.get('time_s',0)*1000:.1f} ms")
+            m1.metric("Path nodes", len(st.session_state.path))
+            m2.metric("Route cost", cost_str)
+            m3.metric("Nodes explored", f"{stats.get('nodes_explored',0):,}")
+            m4.metric("Edges relaxed", f"{stats.get('edges_relaxed',0):,}")
+            m5.metric("CPU time", f"{stats.get('time_s',0)*1000:.1f} ms")
 
-    # Map
     fmap = build_map(
         coords, graph, edges_df,
         path=st.session_state.path,
@@ -510,7 +515,6 @@ with main_col:
     )
     map_data = st_folium(fmap, width=None, height=580, returned_objects=["last_clicked"])
 
-    # Click-to-set waypoint
     if map_data and map_data.get("last_clicked"):
         click = map_data["last_clicked"]
         clat, clon = click["lat"], click["lng"]
@@ -526,7 +530,6 @@ with main_col:
                 st.session_state.goal_node = nid
                 st.rerun()
 
-    # ── Path table ─────────────────────────────────────────────
     if st.session_state.path:
         with st.expander(f"Path details  ({len(st.session_state.path)} nodes)", expanded=False):
             rows = []
@@ -553,7 +556,6 @@ with main_col:
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, height=300)
 
-    # ── Algorithm explainer ────────────────────────────────────
     with st.expander("How A* works in this planner", expanded=False):
         st.markdown("""
 ### A\\* Search Algorithm
@@ -574,16 +576,15 @@ Here the Haversine heuristic uses *straight-line distance ÷ max road speed*, wh
 
 | Heuristic | Admissible? | Speed |
 |-----------|-------------|-------|
-| Haversine ÷ max speed | ✅ Yes | Fast |
-| Euclidean degree distance | ❌ No | Faster (fewer nodes) |
-| Zero (= Dijkstra / UCS) | ✅ Yes | Slowest (explores most) |
+| Haversine ÷ max speed |  Yes | Fast |
+| Euclidean degree distance |  No | Faster (fewer nodes) |
+| Zero (= Dijkstra / UCS) |  Yes | Slowest (explores most) |
 
 **Disaster simulation:**  
 Randomly blocked roads and intersections are removed from the graph before search runs.  
 A\\* automatically re-routes around them if an alternative path exists.
         """)
 
-# ── Footer ─────────────────────────────────────────────────────
 st.markdown("""
 <hr style='margin-top:2rem'>
 <p style='text-align:center;color:#7f8c8d;font-size:0.8rem'>

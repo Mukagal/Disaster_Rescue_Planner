@@ -8,9 +8,6 @@ import pandas as pd
 import folium
 import streamlit as st
 from streamlit_folium import st_folium
-import streamlit.components.v1 as components
-
-
 
 
 NODES_CSV = "output_nodes.csv"
@@ -48,45 +45,6 @@ WEIGHT_LABELS = {
     "travel_time": "Travel time  (seconds)",
     "distance":    "Physical distance  (metres)",
 }
-
-def get_geolocation():
-    """Injects JS that writes GPS coords into the URL query string,
-    then triggers a Streamlit rerun so query_params can be read."""
-    components.html("""
-        <button onclick="getLocation()" style="
-            background:#27ae60;color:white;border:none;padding:8px 14px;
-            border-radius:6px;cursor:pointer;font-size:14px;width:100%">
-             Use my current location
-        </button>
-        <div id="status" style="font-size:12px;margin-top:6px;color:#555"></div>
-        <script>
-        function getLocation() {
-            document.getElementById('status').innerText = 'Requesting GPS…';
-            if (!navigator.geolocation) {
-                document.getElementById('status').innerText = 'Geolocation not supported';
-                return;
-            }
-            navigator.geolocation.getCurrentPosition(
-                function(pos) {
-                    const lat = pos.coords.latitude;
-                    const lon = pos.coords.longitude;
-                    document.getElementById('status').innerText =
-                        'Got: ' + lat.toFixed(5) + ', ' + lon.toFixed(5) + ' — setting start…';
-                    // Write into parent page URL and trigger Streamlit rerun
-                    const url = new URL(window.parent.location.href);
-                    url.searchParams.set('geo_lat', lat.toFixed(6));
-                    url.searchParams.set('geo_lon', lon.toFixed(6));
-                    window.parent.history.replaceState({}, '', url);
-                    // Simulate a tiny DOM event so Streamlit detects a change
-                    window.parent.dispatchEvent(new Event('popstate'));
-                },
-                function(err) {
-                    document.getElementById('status').innerText = 'Error: ' + err.message;
-                }
-            );
-        }
-        </script>
-    """, height=80)
 
 @st.cache_data(show_spinner="Loading map data…")
 def load_graph():
@@ -372,8 +330,6 @@ with sidebar:
     st.subheader("Waypoints")
     st.caption("Pick nodes by ID or use the random buttons.")
 
-    get_geolocation()   
-
     geo_lat = st.query_params.get("geo_lat")
     geo_lon = st.query_params.get("geo_lon")
     if geo_lat and geo_lon:
@@ -443,7 +399,7 @@ with sidebar:
         help="Simulates collapsed intersections"
     )
 
-    if st.button("Apply road blockages", use_container_width=True):
+    if st.button("Apply road blockages", width="stretch"):
         total_ways = edges_df["way_id"].nunique()
         total_nodes = len(all_node_ids)
         n_block_ways = int(total_ways  * block_pct / 100)
@@ -455,7 +411,7 @@ with sidebar:
         st.session_state.ran_search = False
         st.success(f"Blocked {n_block_ways} roads + {n_block_nodes} nodes")
 
-    if st.button("Clear all blockages", use_container_width=True):
+    if st.button("Clear all blockages", width="stretch"):
         st.session_state.blocked_ways  = set()
         st.session_state.blocked_nodes = set()
         st.session_state.path = []
@@ -464,7 +420,7 @@ with sidebar:
     st.markdown("---")
     show_all = st.checkbox("Show road network on map", value=False, help="Renders all edges — slower for large maps")
 
-    run_btn = st.button("Run A* Search", type="primary", use_container_width=True)
+    run_btn = st.button("Run A* Search", type="primary", width="stretch")
 
 if run_btn:
     if not st.session_state.start_node or not st.session_state.goal_node:
@@ -513,7 +469,7 @@ with main_col:
         blocked_nodes=st.session_state.blocked_nodes,
         show_all_edges=show_all,
     )
-    map_data = st_folium(fmap, width=None, height=580, returned_objects=["last_clicked"])
+    map_data = st_folium(fmap, width="100%", height=580, returned_objects=["last_clicked"])
 
     if map_data and map_data.get("last_clicked"):
         click = map_data["last_clicked"]
@@ -554,7 +510,7 @@ with main_col:
                     "Seg time": seg_time,
                     "Road type": seg_hw,
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, height=300)
+            st.dataframe(pd.DataFrame(rows), width="stretch", height=300)
 
     with st.expander("How A* works in this planner", expanded=False):
         st.markdown("""

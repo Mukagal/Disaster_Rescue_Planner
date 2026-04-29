@@ -95,7 +95,7 @@ f(n) = g(n) + h(n)
 
 ---
 
-## 📊 Results
+## Results
 
 | Metric | Haversine | Euclidean | Zero (Dijkstra) |
 |--------|-----------|-----------|-----------------|

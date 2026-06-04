@@ -3,7 +3,6 @@ import heapq
 import time
 import random
 from collections import defaultdict
-
 import pandas as pd
 import folium
 import streamlit as st
@@ -15,25 +14,6 @@ EDGES_CSV = "output_edges.csv"
 
 MAP_CENTER = [43.2075, 76.6364]
 MAP_ZOOM  = 13
-
-ROAD_COLORS = {
-    "trunk": "#e74c3c",
-    "trunk_link": "#e74c3c",
-    "primary": "#e67e22",
-    "primary_link": "#e67e22",
-    "secondary": "#f1c40f",
-    "secondary_link": "#f1c40f",
-    "tertiary": "#2ecc71",
-    "tertiary_link": "#2ecc71",
-    "residential": "#3498db",
-    "living_street": "#9b59b6",
-    "service": "#95a5a6",
-    "unclassified": "#bdc3c7",
-    "footway": "#1abc9c",
-    "path": "#1abc9c",
-    "cycleway": "#1abc9c",
-    "steps": "#1abc9c",
-}
 
 HEURISTIC_LABELS = {
     "haversine": "Haversine distance ÷ max-speed  (admissible, fast)",
@@ -59,11 +39,11 @@ def load_graph():
     graph = defaultdict(list)
     for row in edges_df.itertuples(index=False):
         graph[row.from_node].append({
-            "to":           row.to_node,
-            "distance_m":   float(row.distance_m),
-            "travel_time_s":float(row.travel_time_s),
-            "highway":      row.highway,
-            "way_id":       str(row.way_id),
+            "to": row.to_node,
+            "distance_m": float(row.distance_m),
+            "travel_time_s": float(row.travel_time_s),
+            "highway": row.highway,
+            "way_id": str(row.way_id),
         })
 
     return coords, graph, nodes_df, edges_df
@@ -101,7 +81,7 @@ def make_heuristic(heuristic_name, weight_mode, goal_lat, goal_lon, max_speed_ms
 
     return {"haversine": h_haversine,
             "euclidean": h_euclidean,
-            "zero":      h_zero}[heuristic_name]
+            "zero":h_zero}[heuristic_name]
 
 
 def astar(coords, graph, start, goal,
@@ -111,10 +91,10 @@ def astar(coords, graph, start, goal,
           blocked_nodes=None):
     """
     Returns:
-        path        – list of node_ids from start to goal (or [])
-        stats       – dict with nodes_explored, edges_relaxed, cost, time_s
+        path – list of node_ids from start to goal (or [])
+        stats – dict with nodes_explored, edges_relaxed, cost, time_s
     """
-    if blocked_ways  is None: blocked_ways  = set()
+    if blocked_ways is None: blocked_ways  = set()
     if blocked_nodes is None: blocked_nodes = set()
 
     if start not in coords or goal not in coords:
@@ -148,10 +128,10 @@ def astar(coords, graph, start, goal,
             elapsed = time.perf_counter() - t0
             return path, {
                 "nodes_explored": nodes_explored,
-                "edges_relaxed":  edges_relaxed,
-                "cost":           g_cost[goal],
-                "time_s":         elapsed,
-                "weight_mode":    weight_mode,
+                "edges_relaxed": edges_relaxed,
+                "cost": g_cost[goal],
+                "time_s": elapsed,
+                "weight_mode": weight_mode,
             }
 
         if f > g_cost.get(current, math.inf) + h(coords, current):
@@ -180,11 +160,11 @@ def astar(coords, graph, start, goal,
     elapsed = time.perf_counter() - t0
     return [], {
         "nodes_explored": nodes_explored,
-        "edges_relaxed":  edges_relaxed,
-        "cost":           None,
-        "time_s":         elapsed,
-        "weight_mode":    weight_mode,
-        "error":          "No path found — destination is unreachable",
+        "edges_relaxed": edges_relaxed,
+        "cost": None,
+        "time_s": elapsed,
+        "weight_mode": weight_mode,
+        "error": "No path found — destination is unreachable",
     }
 
 
@@ -197,38 +177,15 @@ def nearest_node(coords, lat, lon):
             best_d, best_id = d, nid
     return best_id
 
-def build_map(coords, graph, edges_df,
+def build_map(coords, graph,
               path=None,
               start_node=None, goal_node=None,
-              blocked_ways=None, blocked_nodes=None,
-              show_all_edges=False):
+              blocked_ways=None, blocked_nodes=None):
     blocked_ways  = blocked_ways  or set()
     blocked_nodes = blocked_nodes or set()
 
     m = folium.Map(location=MAP_CENTER, zoom_start=MAP_ZOOM,
                    tiles="CartoDB positron")
-
-    if show_all_edges:
-        plotted = set()
-        for row in edges_df.itertuples(index=False):
-            key = tuple(sorted([row.from_node, row.to_node]))
-            if key in plotted:
-                continue
-            plotted.add(key)
-            if row.from_node not in coords or row.to_node not in coords:
-                continue
-            is_blocked = (str(row.way_id) in blocked_ways or
-                          row.from_node in blocked_nodes or
-                          row.to_node in blocked_nodes)
-            color = "#e74c3c" if is_blocked else ROAD_COLORS.get(row.highway, "#bdc3c7")
-            weight = 1 if is_blocked else 1
-            opacity = 0.6 if is_blocked else 0.3
-            folium.PolyLine(
-                [[coords[row.from_node][0], coords[row.from_node][1]],
-                 [coords[row.to_node][0],   coords[row.to_node][1]]],
-                color=color, weight=weight, opacity=opacity,
-                tooltip=f"{row.highway} | {row.distance_m:.0f}m"
-            ).add_to(m)
 
     if path and len(path) > 1:
         path_coords = [list(coords[n]) for n in path if n in coords]
@@ -265,7 +222,7 @@ def build_map(coords, graph, edges_df,
             icon=folium.Icon(color="red", icon="flag", prefix="fa")
         ).add_to(m)
 
-    for nid in list(blocked_nodes)[:200]:   # cap rendering
+    for nid in list(blocked_nodes)[:200]:  
         if nid in coords:
             lat, lon = coords[nid]
             folium.CircleMarker(
@@ -418,7 +375,6 @@ with sidebar:
         st.session_state.ran_search = False
 
     st.markdown("---")
-    show_all = st.checkbox("Show road network on map", value=False, help="Renders all edges — slower for large maps")
 
     run_btn = st.button("Run A* Search", type="primary", width="stretch")
 
@@ -467,7 +423,6 @@ with main_col:
         goal_node=st.session_state.goal_node,
         blocked_ways=st.session_state.blocked_ways,
         blocked_nodes=st.session_state.blocked_nodes,
-        show_all_edges=show_all,
     )
     map_data = st_folium(fmap, width="100%", height=580, returned_objects=["last_clicked"])
 

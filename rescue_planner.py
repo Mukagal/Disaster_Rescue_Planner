@@ -417,7 +417,7 @@ with main_col:
             m5.metric("CPU time", f"{stats.get('time_s',0)*1000:.1f} ms")
 
     fmap = build_map(
-        coords, graph, edges_df,
+        coords, graph,
         path=st.session_state.path,
         start_node=st.session_state.start_node,
         goal_node=st.session_state.goal_node,
